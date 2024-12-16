@@ -12,74 +12,41 @@ scs_log_t g_scs_log = nullptr;
 
 uint64_t load_unit_tree_economy_u_address = 0;
 prism::load_unit_tree_economy_u_fn* original_load_unit_tree_economy_u_fn = nullptr;
-prism::fs_get_cached_entry_fn* fs_get_cached_entry = nullptr;
-prism::cache_entry_t_destructor_fn* cache_entry_t_destructor = nullptr;
-uint64_t fs_cached_entries_mutex = 0;
+prism::fs_remove_from_cache_fn* fs_remove_from_cache = nullptr;
 
 bool g_installed = false;
 
 uint64_t detoured_load_unit_tree_economy_u_(const uint64_t a1, prism::string& path, const uint64_t a3, const uint64_t a4)
 {
-    AcquireSRWLockExclusive(reinterpret_cast<PSRWLOCK>(fs_cached_entries_mutex));
-
-    const auto cache_entry = fs_get_cached_entry(path, 1);
-
-    ReleaseSRWLockExclusive(reinterpret_cast<PSRWLOCK>(fs_cached_entries_mutex));
-
-    if (cache_entry)
-    {
-        cache_entry->next_entry->prev_entry = cache_entry->prev_entry;
-        cache_entry->prev_entry->next_entry = cache_entry->next_entry;
-        cache_entry_t_destructor(cache_entry);
-        g_scs_log(SCS_LOG_TYPE_message, "[ScsSaveCacheBuster] Cleared Save Cache");
-    }
-
+    fs_remove_from_cache(path, 1);
     return original_load_unit_tree_economy_u_fn(a1, path, a3, a4);
 }
 
 bool install()
 {
-    load_unit_tree_economy_u_address = pattern::scan("48 89 5c 24 10 48 89 74 24 18 55 57 41 54 41 56 41 57 48 8b ec 48 81 ec 80 00 00 00 49 8b f9 45 8b f0 48 8b f1 41 b9 01 00 00 00", g_game_base, g_module_size);
+    const auto load_unit_tree_economy_u_call_address = pattern::scan("48 8d 8d ? ? ? ? e8 ? ? ? ? 4c 8b bd ? ? ? ? 48 8b d0 49 81 c7", g_game_base, g_module_size);
 
-    if (load_unit_tree_economy_u_address == 0)
+    if (load_unit_tree_economy_u_call_address == 0)
     {
-        g_scs_log(SCS_LOG_TYPE_error, "[ScsSaveCacheBuster] Could not find address for 'load_unit_tree<economy_u>'");
+        g_scs_log(SCS_LOG_TYPE_error, "[ScsSaveCacheBuster] Could not find pattern for 'load_unit_tree<economy_u>'");
         return false;
     }
 
-    const auto offsets = pattern::scan(
-        "e8 ? ? ? ? 48 8b d8 48 85 c0 74 ? 48 8b 10 48 8b 48 08 48 89 4a 08 48 8b 50 08 48 8b 08 33 c0 48 89 0a 48 89 03 48 89 43 08 48 8d 0d ? ? ? ? ff 15 ? ? ? ? 48 85 db 74 ? 48 8b cb e8",
+    load_unit_tree_economy_u_address = load_unit_tree_economy_u_call_address + 8 + *reinterpret_cast<int32_t*>(load_unit_tree_economy_u_call_address + 8) + 4;
+
+    const auto fs_remove_from_cache_call_address = pattern::scan(
+        "ba ? ? ? ? 48 8b 59 ? 48 8d 4b ? e8 ? ? ? ? b9 ? ? ? ? e8",
         g_game_base,
         g_module_size
     );
 
-    if (offsets == NULL)
+    if (fs_remove_from_cache_call_address == NULL)
     {
-        g_scs_log(SCS_LOG_TYPE_error, "[ScsSaveCacheBuster] Could not find pattern for 'fs_get_cached_entry | fs cache mutex | cache_entry_t::destructor'");
+        g_scs_log(SCS_LOG_TYPE_error, "[ScsSaveCacheBuster] Could not find pattern for 'fs_remove_from_cache'");
         return false;
     }
 
-    fs_get_cached_entry = reinterpret_cast<prism::fs_get_cached_entry_fn*>(offsets + *reinterpret_cast<int32_t*>(offsets + 1) + 1 + 4);
-    fs_cached_entries_mutex = offsets + *reinterpret_cast<int32_t*>(offsets + 46) + 46 + 4;
-    cache_entry_t_destructor = reinterpret_cast<prism::cache_entry_t_destructor_fn*>(offsets + *reinterpret_cast<int32_t*>(offsets + 65) + 65 + 4);
-
-    if (fs_get_cached_entry == nullptr)
-    {
-        g_scs_log(SCS_LOG_TYPE_error, "[ScsSaveCacheBuster] Could not find address for 'fs_get_cached_entry'");
-        return false;
-    }
-
-    if (fs_cached_entries_mutex == 0)
-    {
-        g_scs_log(SCS_LOG_TYPE_error, "[ScsSaveCacheBuster] Could not find address for fs cache mutex");
-        return false;
-    }
-
-    if (cache_entry_t_destructor == nullptr)
-    {
-        g_scs_log(SCS_LOG_TYPE_error, "[ScsSaveCacheBuster] Could not find address for 'cache_entry_t::destructor'");
-        return false;
-    }
+    fs_remove_from_cache = reinterpret_cast<prism::fs_remove_from_cache_fn*>(fs_remove_from_cache_call_address + *reinterpret_cast<int32_t*>(fs_remove_from_cache_call_address + 14) + 14 + 4);
 
     if (MH_CreateHook(reinterpret_cast<LPVOID>(load_unit_tree_economy_u_address),
                       &detoured_load_unit_tree_economy_u_,

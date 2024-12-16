@@ -39,13 +39,9 @@ namespace prism
 #pragma pack(pop)
 
 
-    using fs_get_cached_entry_fn = cache_entry_t* __fastcall(
+    using fs_remove_from_cache_fn = void __fastcall(
         string& path,
-        uint64_t v
-    );
-
-    using cache_entry_t_destructor_fn = void __fastcall(
-        cache_entry_t* instance
+        uint64_t device_type
     );
 
     using load_unit_tree_economy_u_fn = uint64_t __fastcall(
